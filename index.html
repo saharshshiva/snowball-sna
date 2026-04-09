@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Snowball SNA — Directed Network</title>
+  <meta name="description" content="Directed snowball sampling social network — seeds, levels, and recruitment flow."/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #1a0a12;
+      --surface:   #2d1022;
+      --surface2:  #3d1630;
+      --border:    #6b2147;
+      --text:      #fce7f3;
+      --muted:     #c084a0;
+      --accent:    #ec4899;
+      --accent2:   #f9a8d4;
+      --glow:      rgba(236,72,153,0.5);
+
+      /* Level tones — all pinkish spectrum */
+      --l0: #fbbf24;   /* gold — seeds */
+      --l1: #f472b6;   /* hot pink */
+      --l2: #e879f9;   /* fuchsia */
+      --l3: #c084fc;   /* lavender */
+      --l4: #fb7185;   /* rose */
+      --l5: #f97316;   /* coral-orange */
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      overflow-y: scroll;   /* always scrollable */
+    }
+
+    /* ── animated gradient bg ─────────────────────── */
+    body::before {
+      content: "";
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 20%, rgba(236,72,153,0.08) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 80%, rgba(249,168,212,0.06) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+    body > * { position: relative; z-index: 1; }
+
+    /* ── Header ──────────────────────────────────── */
+    header {
+      background: linear-gradient(135deg, #2d1022 0%, #1a0a12 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(12px);
+    }
+
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-icon {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #ec4899, #be185d);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+      box-shadow: 0 0 18px var(--glow);
+    }
+    .brand-text h1 {
+      font-size: 1.2rem; font-weight: 700;
+      background: linear-gradient(90deg, #fbbf24, #f472b6, #e879f9);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .brand-text p { font-size: 0.7rem; color: var(--muted); margin-top: 1px; }
+
+    /* header right controls */
+    .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    /* ── Pill buttons ────────────────────────────── */
+    .pill-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.72rem;
+      padding: 6px 14px;
+      cursor: pointer;
+      transition: all .2s;
+      white-space: nowrap;
+    }
+    .pill-btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .pill-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 0 10px var(--glow); }
+
+    /* Reset button — prominent */
+    #btn-reset {
+      background: linear-gradient(135deg, #be185d, #ec4899);
+      border: none;
+      border-radius: 100px;
+      color: #fff;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 8px 18px;
+      cursor: pointer;
+      box-shadow: 0 0 14px var(--glow);
+      transition: all .2s;
+      display: flex; align-items: center; gap: 6px;
+    }
+    #btn-reset:hover { transform: scale(1.05); box-shadow: 0 0 22px var(--glow); }
+    #btn-reset:active { transform: scale(0.97); }
+
+    /* ── Stats bar ───────────────────────────────── */
+    .stats-bar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 16px 28px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(45,16,34,0.5);
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 18px;
+      display: flex; flex-direction: column; gap: 1px;
+      min-width: 100px;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .stat-card:hover { border-color: var(--accent); box-shadow: 0 0 10px var(--glow); }
+    .stat-card .val {
+      font-family: 'Space Mono', monospace;
+      font-size: 1.4rem; font-weight: 700;
+      color: var(--accent2);
+    }
+    .stat-card .lbl { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+
+    /* ── Page layout ─────────────────────────────── */
+    .page { display: flex; min-height: calc(100vh - 160px); }
+
+    /* ── Graph panel ─────────────────────────────── */
+    #graph-wrap {
+      flex: 1;
+      position: relative;
+      min-height: 720px;
+      height: calc(100vh - 160px);
+    }
+    #graph-wrap svg { width: 100%; height: 100%; display: block; }
+
+    /* Direction legend pill */
+    .dir-badge {
+      position: absolute; bottom: 14px; left: 14px;
+      background: rgba(45,16,34,0.9);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 0.7rem;
+      color: var(--muted);
+      backdrop-filter: blur(8px);
+    }
+    .dir-badge span { color: var(--accent2); font-weight: 600; }
+
+    /* Tooltip */
+    #tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: rgba(45,16,34,0.97);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 0.76rem;
+      line-height: 1.7;
+      max-width: 210px;
+      opacity: 0;
+      transition: opacity .15s;
+      z-index: 99;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 24px rgba(236,72,153,0.2);
+    }
+    #tooltip.show { opacity: 1; }
+    #tooltip .tt-id { font-family: 'Space Mono', monospace; font-size: 0.9rem; font-weight: 700; color: var(--accent2); margin-bottom: 5px; }
+
+    /* ── Sidebar ─────────────────────────────────── */
+    .sidebar {
+      width: 250px;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      padding: 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      overflow-y: auto;
+      max-height: calc(100vh - 160px);
+      position: sticky;
+      top: 160px;      /* below header */
+      align-self: flex-start;
+    }
+
+    .sb-section h3 {
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: var(--muted);
+      font-weight: 600;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Legend */
+    .legend-list { display: flex; flex-direction: column; gap: 7px; }
+    .legend-item {
+      display: flex; align-items: center; gap: 9px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      border-radius: 8px;
+      padding: 5px 7px;
+      transition: background .15s;
+      user-select: none;
+    }
+    .legend-item:hover { background: var(--surface2); }
+    .legend-item.dimmed { opacity: 0.3; }
+    .legend-dot {
+      width: 13px; height: 13px; border-radius: 50%; flex-shrink: 0;
+    }
+    .legend-sub { font-size: 0.62rem; color: var(--muted); }
+    .seed-ring-icon {
+      width: 13px; height: 13px; border-radius: 50%;
+      border: 2px dashed #fbbf24; flex-shrink: 0;
+      box-shadow: 0 0 6px rgba(251,191,36,0.5);
+    }
+
+    /* Filter group */
+    .filter-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
+
+    /* Node info box */
+    .node-info-box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 0.73rem;
+      line-height: 1.8;
+      min-height: 90px;
+    }
+    .ni-empty { color: var(--muted); font-style: italic; font-size: 0.72rem; }
+    .ni-id { font-family: 'Space Mono', monospace; font-weight: 700; font-size: 0.95rem; }
+    .badge {
+      display: inline-block;
+      padding: 1px 9px;
+      border-radius: 100px;
+      font-size: 0.6rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .badge-seed    { background: rgba(251,191,36,0.15); color: #fbbf24; border: 1px solid #fbbf24; }
+    .badge-nonseed { background: rgba(236,72,153,0.12); color: #f472b6; border: 1px solid #ec4899; }
+
+    /* Bar chart */
+    .bar-row { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; font-size: 0.7rem; }
+    .bar-lbl { width: 38px; color: var(--muted); flex-shrink: 0; }
+    .bar-track { flex: 1; height: 9px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+    .bar-fill  { height: 100%; border-radius: 4px; transition: width .5s ease; }
+    .bar-cnt   { width: 22px; text-align: right; font-family: 'Space Mono', monospace; font-size: 0.62rem; color: var(--muted); }
+
+    /* Sliders */
+    .ctrl-lbl { font-size: 0.68rem; color: var(--muted); margin-bottom: 3px; }
+    input[type=range] { width: 100%; accent-color: var(--accent); }
+
+    /* Zoom */
+    .zoom-row { display: flex; gap: 6px; }
+    .zoom-btn {
+      flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-size: 1rem; padding: 5px;
+      cursor: pointer; transition: background .2s;
+    }
+    .zoom-btn:hover { background: var(--accent); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: var(--surface); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    /* ── Below-fold: additional info section ─────── */
+    .info-section {
+      padding: 40px 28px;
+      border-top: 1px solid var(--border);
+    }
+    .info-section h2 {
+      font-size: 1.1rem; font-weight: 700;
+      background: linear-gradient(90deg, #f472b6, #e879f9);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 20px;
+    }
+    .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 14px; }
+    .info-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      transition: border-color .2s;
+    }
+    .info-card:hover { border-color: var(--accent); }
+    .info-card h4 { font-size: 0.85rem; font-weight: 600; color: var(--accent2); margin-bottom: 8px; }
+    .info-card p  { font-size: 0.75rem; color: var(--muted); line-height: 1.7; }
+    .info-card .metric {
+      font-family: 'Space Mono', monospace;
+      font-size: 1.5rem; font-weight: 700;
+      color: var(--accent); margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══════════════════════════════════════════ -->
+<header>
+  <div class="brand">
+    <div class="brand-icon">⬡</div>
+    <div class="brand-text">
+      <h1>Snowball Network Analysis</h1>
+      <p>Directed graph · Seeds &amp; Level Hierarchy · Snowball Sampling</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <button class="pill-btn active" data-filter="all" id="filter-all">All Nodes</button>
+    <button class="pill-btn" data-filter="seed">Seeds</button>
+    <button class="pill-btn" data-filter="nonseed">Non-Seeds</button>
+    <button class="pill-btn" data-filter="Male">♂ Male</button>
+    <button class="pill-btn" data-filter="Female">♀ Female</button>
+    <button class="pill-btn" data-filter="Adult">Adult</button>
+    <button class="pill-btn" data-filter="Minor">Minor</button>
+    <button id="btn-reset">↺ Reset</button>
+  </div>
+</header>
+
+<!-- ═══ STATS BAR ══════════════════════════════════════════ -->
+<div class="stats-bar">
+  <div class="stat-card"><span class="val" id="s-nodes">100</span><span class="lbl">Nodes</span></div>
+  <div class="stat-card"><span class="val" id="s-edges">—</span><span class="lbl">Directed Edges</span></div>
+  <div class="stat-card"><span class="val" id="s-seeds">61</span><span class="lbl">Seeds</span></div>
+  <div class="stat-card"><span class="val" id="s-levels">6</span><span class="lbl">Levels</span></div>
+  <div class="stat-card"><span class="val" id="s-density">—</span><span class="lbl">Density</span></div>
+  <div class="stat-card"><span class="val" id="s-components">—</span><span class="lbl">Components</span></div>
+  <div class="stat-card"><span class="val" id="s-top-deg">—</span><span class="lbl">Most Connected</span></div>
+</div>
+
+<!-- ═══ MAIN ════════════════════════════════════════════════ -->
+<div class="page">
+
+  <!-- Graph -->
+  <div id="graph-wrap">
+    <svg id="svg"></svg>
+    <div id="tooltip"></div>
+    <div class="dir-badge">
+      <span>→ Arrow</span> = recruitment direction (recruiter → recruit)<br>
+      <span>Gold ring</span> = seed node (Seed = 1)
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <!-- Selected node -->
+    <div class="sb-section">
+      <h3>Selected Node</h3>
+      <div class="node-info-box" id="node-info">
+        <div class="ni-empty">Click a node to inspect</div>
+      </div>
+    </div>
+
+    <!-- Level legend -->
+    <div class="sb-section">
+      <h3>Level Hierarchy</h3>
+      <div class="legend-list" id="level-legend"></div>
+    </div>
+
+    <!-- Nodes per level bars -->
+    <div class="sb-section">
+      <h3>Nodes per Level</h3>
+      <div id="level-bars"></div>
+    </div>
+
+    <!-- Force controls -->
+    <div class="sb-section">
+      <h3>Layout Controls</h3>
+      <div class="ctrl-lbl">Link Distance</div>
+      <input type="range" id="ctrl-dist" min="30" max="200" step="5" value="70"/>
+      <div class="ctrl-lbl" style="margin-top:8px">Repulsion</div>
+      <input type="range" id="ctrl-charge" min="-400" max="-20" step="10" value="-150"/>
+      <div class="ctrl-lbl" style="margin-top:8px">Link Strength</div>
+      <input type="range" id="ctrl-str" min="0.01" max="1" step="0.01" value="0.4"/>
+    </div>
+
+    <!-- Zoom -->
+    <div class="sb-section">
+      <h3>Zoom</h3>
+      <div class="zoom-row">
+        <button class="zoom-btn" id="btn-zi">＋</button>
+        <button class="zoom-btn" id="btn-zr">⌂</button>
+        <button class="zoom-btn" id="btn-zo">－</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══ SCROLL-DOWN INFO SECTION ════════════════════════════ -->
+<div class="info-section" id="info-section">
+  <h2>📊 Network Insights</h2>
+  <div class="info-grid" id="info-grid">
+    <!-- filled by JS -->
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     DATA & GRAPH
+══════════════════════════════════════════════════════════════ -->
+<script>
+// ── DATA ──────────────────────────────────────────────────
+const RAW_NODES = [
+  {id:"P01",seed:1,gender:"Male",  age:"Adult",level:0},
+  {id:"P02",seed:1,gender:"Female",age:"Adult",level:0},
+  {id:"P03",seed:1,gender:"Male",  age:"Minor",level:0},
+  {id:"P04",seed:1,gender:"Female",age:"Minor",level:0},
+  {id:"P05",seed:0,gender:"Male",  age:"Adult",level:1},
+  {id:"P06",seed:0,gender:"Female",age:"Adult",level:1},
+  {id:"P07",seed:0,gender:"Male",  age:"Minor",level:1},
+  {id:"P08",seed:0,gender:"Female",age:"Minor",level:1},
+  {id:"P09",seed:0,gender:"Male",  age:"Adult",level:2},
+  {id:"P10",seed:0,gender:"Female",age:"Adult",level:2},
+  {id:"P11",seed:0,gender:"Male",  age:"Minor",level:2},
+  {id:"P12",seed:0,gender:"Female",age:"Minor",level:2},
+  {id:"P13",seed:1,gender:"Female",age:"Minor",level:5},
+  {id:"P14",seed:1,gender:"Male",  age:"Adult",level:4},
+  {id:"P15",seed:1,gender:"Male",  age:"Adult",level:5},
+  {id:"P16",seed:1,gender:"Male",  age:"Adult",level:1},
+  {id:"P17",seed:0,gender:"Male",  age:"Minor",level:0},
+  {id:"P18",seed:0,gender:"Male",  age:"Minor",level:4},
+  {id:"P19",seed:0,gender:"Female",age:"Minor",level:3},
+  {id:"P20",seed:1,gender:"Female",age:"Minor",level:4},
+  {id:"P21",seed:0,gender:"Female",age:"Adult",level:4},
+  {id:"P22",seed:0,gender:"Male",  age:"Adult",level:5},
+  {id:"P23",seed:1,gender:"Female",age:"Minor",level:4},
+  {id:"P24",seed:1,gender:"Female",age:"Minor",level:5},
+  {id:"P25",seed:0,gender:"Female",age:"Minor",level:1},
+  {id:"P26",seed:0,gender:"Male",  age:"Minor",level:5},
+  {id:"P27",seed:1,gender:"Male",  age:"Adult",level:0},
+  {id:"P28",seed:1,gender:"Female",age:"Adult",level:2},
+  {id:"P29",seed:1,gender:"Female",age:"Adult",level:2},
+  {id:"P30",seed:1,gender:"Female",age:"Adult",level:3},
+  {id:"P31",seed:1,gender:"Female",age:"Adult",level:0},
+  {id:"P32",seed:1,gender:"Female",age:"Adult",level:0},
+  {id:"P33",seed:1,gender:"Female",age:"Adult",level:2},
+  {id:"P34",seed:1,gender:"Female",age:"Minor",level:4},
+  {id:"P35",seed:1,gender:"Female",age:"Minor",level:0},
+  {id:"P36",seed:1,gender:"Male",  age:"Minor",level:0},
+  {id:"P37",seed:1,gender:"Male",  age:"Adult",level:3},
+  {id:"P38",seed:1,gender:"Female",age:"Adult",level:5},
+  {id:"P39",seed:1,gender:"Male",  age:"Adult",level:5},
+  {id:"P40",seed:1,gender:"Male",  age:"Adult",level:3},
+  {id:"P41",seed:1,gender:"Male",  age:"Minor",level:1},
+  {id:"P42",seed:0,gender:"Female",age:"Adult",level:5},
+  {id:"P43",seed:1,gender:"Male",  age:"Adult",level:1},
+  {id:"P44",seed:1,gender:"Female",age:"Minor",level:1},
+  {id:"P45",seed:0,gender:"Male",  age:"Adult",level:5},
+  {id:"P46",seed:1,gender:"Male",  age:"Adult",level:4},
+  {id:"P47",seed:0,gender:"Male",  age:"Minor",level:4},
+  {id:"P48",seed:1,gender:"Female",age:"Adult",level:4},
+  {id:"P49",seed:0,gender:"Male",  age:"Minor",level:3},
+  {id:"P50",seed:1,gender:"Female",age:"Adult",level:1},
+  {id:"P51",seed:0,gender:"Male",  age:"Minor",level:4},
+  {id:"P52",seed:1,gender:"Female",age:"Minor",level:4},
+  {id:"P53",seed:0,gender:"Male",  age:"Minor",level:0},
+  {id:"P54",seed:0,gender:"Female",age:"Minor",level:2},
+  {id:"P55",seed:1,gender:"Male",  age:"Adult",level:0},
+  {id:"P56",seed:1,gender:"Male",  age:"Adult",level:3},
+  {id:"P57",seed:1,gender:"Female",age:"Adult",level:3},
+  {id:"P58",seed:0,gender:"Male",  age:"Adult",level:3},
+  {id:"P59",seed:0,gender:"Female",age:"Adult",level:3},
+  {id:"P60",seed:0,gender:"Female",age:"Adult",level:0},
+  {id:"P61",seed:1,gender:"Male",  age:"Adult",level:3},
+  {id:"P62",seed:1,gender:"Female",age:"Adult",level:4},
+  {id:"P63",seed:0,gender:"Female",age:"Adult",level:1},
+  {id:"P64",seed:1,gender:"Male",  age:"Minor",level:5},
+  {id:"P65",seed:0,gender:"Female",age:"Minor",level:1},
+  {id:"P66",seed:1,gender:"Female",age:"Minor",level:2},
+  {id:"P67",seed:0,gender:"Female",age:"Minor",level:4},
+  {id:"P68",seed:1,gender:"Male",  age:"Adult",level:3},
+  {id:"P69",seed:1,gender:"Male",  age:"Adult",level:1},
+  {id:"P70",seed:1,gender:"Male",  age:"Minor",level:2},
+  {id:"P71",seed:0,gender:"Male",  age:"Adult",level:3},
+  {id:"P72",seed:0,gender:"Male",  age:"Adult",level:4},
+  {id:"P73",seed:1,gender:"Male",  age:"Adult",level:5},
+  {id:"P74",seed:1,gender:"Male",  age:"Minor",level:3},
+  {id:"P75",seed:1,gender:"Male",  age:"Minor",level:1},
+  {id:"P76",seed:1,gender:"Male",  age:"Minor",level:1},
+  {id:"P77",seed:1,gender:"Male",  age:"Adult",level:1},
+  {id:"P78",seed:1,gender:"Male",  age:"Adult",level:4},
+  {id:"P79",seed:0,gender:"Female",age:"Minor",level:2},
+  {id:"P80",seed:1,gender:"Female",age:"Adult",level:0},
+  {id:"P81",seed:0,gender:"Male",  age:"Adult",level:1},
+  {id:"P82",seed:1,gender:"Male",  age:"Minor",level:3},
+  {id:"P83",seed:1,gender:"Male",  age:"Adult",level:1},
+  {id:"P84",seed:0,gender:"Female",age:"Minor",level:0},
+  {id:"P85",seed:1,gender:"Female",age:"Adult",level:3},
+  {id:"P86",seed:0,gender:"Male",  age:"Minor",level:5},
+  {id:"P87",seed:0,gender:"Female",age:"Adult",level:0},
+  {id:"P88",seed:1,gender:"Female",age:"Adult",level:5},
+  {id:"P89",seed:0,gender:"Male",  age:"Minor",level:4},
+  {id:"P90",seed:1,gender:"Male",  age:"Adult",level:3},
+  {id:"P91",seed:0,gender:"Female",age:"Adult",level:5},
+  {id:"P92",seed:1,gender:"Female",age:"Adult",level:3},
+  {id:"P93",seed:1,gender:"Female",age:"Adult",level:5},
+  {id:"P94",seed:0,gender:"Male",  age:"Minor",level:4},
+  {id:"P95",seed:1,gender:"Male",  age:"Minor",level:5},
+  {id:"P96",seed:0,gender:"Female",age:"Adult",level:0},
+  {id:"P97",seed:1,gender:"Male",  age:"Minor",level:2},
+  {id:"P98",seed:1,gender:"Female",age:"Minor",level:1},
+  {id:"P99",seed:1,gender:"Male",  age:"Adult",level:5},
+  {id:"P100",seed:1,gender:"Male", age:"Adult",level:3}
+];
+
+// Directed ties (from recruiter → recruit) — self-loops removed (P69→P69, P18→P18, P35→P35 excluded)
+const RAW_EDGES = [
+  // 97 directed ties — 3 self-loops (P69→P69, P18→P18, P35→P35) removed to match updated snowball_example.xlsx
+  ["P01","P05"],["P01","P06"],["P02","P08"],["P03","P07"],["P04","P12"],
+  ["P05","P09"],["P06","P10"],["P07","P11"],["P15","P51"],["P02","P38"],
+  ["P67","P23"],["P43","P53"],["P58","P54"],["P46","P92"],["P25","P05"],
+  ["P17","P76"],["P62","P59"],["P11","P03"],["P65","P51"],["P53","P91"],
+  ["P42","P60"],["P98","P51"],["P35","P37"],["P10","P80"],["P37","P84"],
+  ["P30","P65"],["P31","P92"],["P22","P63"],["P52","P38"],["P95","P32"],
+  ["P65","P24"],["P41","P55"],["P06","P94"],["P20","P03"],["P02","P17"],
+  ["P80","P69"],["P42","P60"],["P77","P10"],["P94","P59"],["P76","P25"],
+  ["P38","P73"],["P10","P73"],["P86","P27"],["P88","P13"],["P56","P87"],
+  ["P70","P36"],["P20","P80"],["P71","P99"],["P25","P93"],["P04","P88"],
+  ["P06","P35"],["P87","P64"],["P70","P65"],["P08","P23"],["P96","P11"],
+  ["P65","P35"],["P79","P91"],["P07","P92"],["P39","P78"],["P16","P28"],
+  ["P88","P10"],["P87","P15"],["P51","P53"],["P25","P60"],["P65","P64"],
+  ["P49","P21"],["P14","P38"],["P58","P98"],["P98","P13"],["P79","P29"],
+  ["P68","P10"],["P28","P97"],["P46","P70"],["P08","P38"],["P30","P56"],
+  ["P25","P59"],["P74","P79"],["P21","P09"],["P43","P20"],["P69","P87"],
+  ["P68","P28"],["P50","P52"],["P74","P28"],["P44","P01"],["P74","P46"],
+  ["P20","P13"],["P08","P45"],["P21","P15"],["P85","P65"],["P100","P71"],
+  ["P89","P08"],["P19","P26"],["P82","P75"],["P94","P68"],["P63","P31"],
+  ["P65","P34"],["P52","P93"]
+];
+
+// ── CONSTANTS ─────────────────────────────────────────────
+const LV_COLORS = ["#fbbf24","#f472b6","#e879f9","#c084fc","#fb7185","#f97316"];
+const LV_NAMES  = ["Level 0 (Seeds)","Level 1","Level 2","Level 3","Level 4","Level 5"];
+
+// ── DEGREE MAP ────────────────────────────────────────────
+const degMap = {}, inDegMap = {}, outDegMap = {};
+RAW_NODES.forEach(n => { degMap[n.id]=0; inDegMap[n.id]=0; outDegMap[n.id]=0; });
+RAW_EDGES.forEach(([s,t]) => {
+  outDegMap[s] = (outDegMap[s]||0)+1;
+  inDegMap[t]  = (inDegMap[t]||0)+1;
+  degMap[s]    = (degMap[s]||0)+1;
+  degMap[t]    = (degMap[t]||0)+1;
+});
+
+const nodes = RAW_NODES.map(n => ({
+  ...n,
+  deg: degMap[n.id]||0,
+  inDeg: inDegMap[n.id]||0,
+  outDeg: outDegMap[n.id]||0
+}));
+
+const edges = RAW_EDGES.map(([s,t]) => ({ source:s, target:t }));
+
+// ── STATS ─────────────────────────────────────────────────
+const N = nodes.length, E = edges.length;
+const density = (E / (N*(N-1))).toFixed(4);
+const topNode = [...nodes].sort((a,b)=>b.deg-a.deg)[0];
+
+document.getElementById("s-nodes").textContent   = N;
+document.getElementById("s-edges").textContent   = E;
+document.getElementById("s-density").textContent = density;
+document.getElementById("s-top-deg").textContent = topNode.id;
+
+// Union-Find for component count
+{
+  const par = {}; nodes.forEach(n => par[n.id]=n.id);
+  function find(x){ return par[x]===x?x:(par[x]=find(par[x])); }
+  edges.forEach(e=>{ par[find(e.source)]=find(e.target); });
+  document.getElementById("s-components").textContent =
+    new Set(nodes.map(n=>find(n.id))).size;
+}
+
+// ── LEVEL LEGEND ──────────────────────────────────────────
+const lvCounts = {};
+nodes.forEach(n => lvCounts[n.level] = (lvCounts[n.level]||0)+1);
+
+const legendEl = document.getElementById("level-legend");
+[0,1,2,3,4,5].forEach(lv => {
+  const item = document.createElement("div");
+  item.className = "legend-item"; item.dataset.lv = lv;
+  item.innerHTML = `
+    <span class="legend-dot" style="background:${LV_COLORS[lv]};box-shadow:0 0 6px ${LV_COLORS[lv]}"></span>
+    <span>${LV_NAMES[lv]}<br><span class="legend-sub">${lvCounts[lv]||0} nodes${lv===0?" ★":""}</span></span>
+  `;
+  item.addEventListener("click", () => filterByLevel(lv, item));
+  legendEl.appendChild(item);
+});
+const seedLegendItem = document.createElement("div");
+seedLegendItem.className = "legend-item";
+seedLegendItem.style.marginTop = "8px";
+seedLegendItem.innerHTML = `<span class="seed-ring-icon"></span><span>Seed node <span class="legend-sub">(dashed ring)</span></span>`;
+legendEl.appendChild(seedLegendItem);
+
+// ── LEVEL BARS ────────────────────────────────────────────
+const barsEl = document.getElementById("level-bars");
+const maxCnt = Math.max(...Object.values(lvCounts));
+[0,1,2,3,4,5].forEach(lv => {
+  const cnt = lvCounts[lv]||0;
+  barsEl.innerHTML += `
+    <div class="bar-row">
+      <span class="bar-lbl">Lv ${lv}</span>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:${(cnt/maxCnt*100).toFixed(1)}%;background:${LV_COLORS[lv]}"></div>
+      </div>
+      <span class="bar-cnt">${cnt}</span>
+    </div>`;
+});
+
+// ── INFO SECTION ──────────────────────────────────────────
+const infoCards = [
+  { title:"What is Snowball Sampling?", text:"A non-probability method where initial seeds refer further participants. Each referral wave = one level.", metric:null },
+  { title:"Network Density", text:"Ratio of actual edges to all possible directed edges in the network. Low density = sparse referral chains.", metric: density },
+  { title:"Most Connected Node", text:`Node with highest combined in+out degree — a key referral hub in the network.`, metric: topNode.id },
+  { title:"Seed Coverage", text:`${nodes.filter(n=>n.seed===1).length} of ${N} nodes are seeds (Seed=1) spanning all 6 levels of the sampling wave.`, metric: `${nodes.filter(n=>n.seed===1).length}/100` },
+  { title:"Directed Edges", text:"Arrows show the recruitment direction — from recruiter to recruit. Unidirectional = no reciprocal ties assumed.", metric: E },
+  { title:"Communities", text:"Despite sparse edges, the network splits into 20 components — typical of early-stage snowball sampling.", metric:"20" },
+];
+const grid = document.getElementById("info-grid");
+infoCards.forEach(c => {
+  grid.innerHTML += `
+    <div class="info-card">
+      ${c.metric != null ? `<div class="metric">${c.metric}</div>` : ""}
+      <h4>${c.title}</h4>
+      <p>${c.text}</p>
+    </div>`;
+});
+
+// ═══════════════════════════════════════════════════════════
+// D3 DIRECTED FORCE GRAPH
+// ═══════════════════════════════════════════════════════════
+const svgEl  = d3.select("#svg");
+const wrap   = document.getElementById("graph-wrap");
+let W = wrap.clientWidth, H = wrap.clientHeight;
+
+const zoomG  = svgEl.append("g").attr("class","zoom-g");
+const linkG  = zoomG.append("g").attr("class","links");
+const nodeG  = zoomG.append("g").attr("class","nodes");
+
+// ── Arrow markers per level ────────────────────────────────
+const defs = svgEl.append("defs");
+
+// Drop-shadow filter for seeds
+defs.append("filter").attr("id","seed-glow")
+  .append("feDropShadow")
+  .attr("dx","0").attr("dy","0")
+  .attr("stdDeviation","3")
+  .attr("flood-color","#fbbf24")
+  .attr("flood-opacity","0.7");
+
+[0,1,2,3,4,5].forEach(lv => {
+  defs.append("marker")
+    .attr("id", `arr-${lv}`)
+    .attr("viewBox","0 -4 8 8")
+    .attr("refX", 22)    // offset so arrow tip sits at node edge
+    .attr("refY", 0)
+    .attr("markerWidth", 5)
+    .attr("markerHeight", 5)
+    .attr("orient", "auto")
+    .append("path")
+    .attr("d","M0,-4L8,0L0,4")
+    .attr("fill", LV_COLORS[lv])
+    .attr("opacity", 0.85);
+});
+
+// Zoom
+const zoomBeh = d3.zoom()
+  .scaleExtent([0.1, 5])
+  .on("zoom", e => zoomG.attr("transform", e.transform));
+svgEl.call(zoomBeh);
+
+document.getElementById("btn-zi").onclick = () => svgEl.transition().call(zoomBeh.scaleBy, 1.4);
+document.getElementById("btn-zo").onclick = () => svgEl.transition().call(zoomBeh.scaleBy, 0.7);
+document.getElementById("btn-zr").onclick = () => svgEl.transition().duration(500).call(zoomBeh.transform, d3.zoomIdentity);
+
+// ── Simulation ─────────────────────────────────────────────
+const sim = d3.forceSimulation(nodes)
+  .force("link",   d3.forceLink(edges).id(d=>d.id).distance(70).strength(0.4))
+  .force("charge", d3.forceManyBody().strength(-150))
+  .force("center", d3.forceCenter(W/2, H/2))
+  .force("collide",d3.forceCollide(d => nodeR(d)+4));
+
+function nodeR(d) { return (d.seed===1 ? 13 : 8) + Math.min(d.deg, 8)*0.7; }
+
+// ── Links ──────────────────────────────────────────────────
+let link = linkG.selectAll("line")
+  .data(edges)
+  .join("line")
+  .attr("class","edge")
+  .attr("stroke", d => {
+    const src = nodes.find(n => n.id===(d.source.id||d.source));
+    return src ? LV_COLORS[src.level] : "#ec4899";
+  })
+  .attr("stroke-opacity", 0.4)
+  .attr("stroke-width", 1.5)
+  .attr("marker-end", d => {
+    const src = nodes.find(n => n.id===(d.source.id||d.source));
+    return src ? `url(#arr-${src.level})` : "url(#arr-0)";
+  });
+
+// ── Nodes ──────────────────────────────────────────────────
+let node = nodeG.selectAll("g.node")
+  .data(nodes, d=>d.id)
+  .join("g")
+  .attr("class","node")
+  .attr("id", d=>`n-${d.id}`)
+  .call(d3.drag()
+    .on("start", (e,d)=>{ if(!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+    .on("drag",  (e,d)=>{ d.fx=e.x; d.fy=e.y; })
+    .on("end",   (e,d)=>{ if(!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; }));
+
+// Seed outer glow ring (dashed)
+node.filter(d=>d.seed===1)
+  .append("circle")
+  .attr("class","seed-ring")
+  .attr("r", d=>nodeR(d)+6)
+  .attr("fill","none")
+  .attr("stroke","#fbbf24")
+  .attr("stroke-width",1.8)
+  .attr("stroke-dasharray","4,3")
+  .attr("opacity",0.75);
+
+// Main circle
+node.append("circle")
+  .attr("class","main-circle")
+  .attr("r", d=>nodeR(d))
+  .attr("fill", d=>LV_COLORS[d.level])
+  .attr("fill-opacity", d=>d.seed===1?0.95:0.65)
+  .attr("stroke", d=>d.seed===1?"#fbbf24":"rgba(255,255,255,0.08)")
+  .attr("stroke-width", d=>d.seed===1?2:0.6)
+  .attr("filter", d=>d.seed===1?"url(#seed-glow)":null);
+
+// Gender symbol
+node.append("text")
+  .attr("text-anchor","middle")
+  .attr("dominant-baseline","central")
+  .attr("font-size", d=>nodeR(d)*0.72)
+  .attr("fill","rgba(255,255,255,0.9)")
+  .attr("pointer-events","none")
+  .text(d=>d.gender==="Male"?"♂":"♀");
+
+// Labels for seed level-0 nodes
+node.filter(d=>d.seed===1&&d.level===0)
+  .append("text")
+  .attr("dy", d=>-nodeR(d)-5)
+  .attr("text-anchor","middle")
+  .attr("font-size","7.5px")
+  .attr("fill","#fbbf24")
+  .attr("font-family","Space Mono, monospace")
+  .attr("pointer-events","none")
+  .text(d=>d.id);
+
+// ── Tooltip & Node Info ────────────────────────────────────
+const tooltip = document.getElementById("tooltip");
+const nodeInfo = document.getElementById("node-info");
+
+node
+  .on("mouseover", (event, d) => {
+    tooltip.innerHTML = `
+      <div class="tt-id">${d.id}</div>
+      <b>Level:</b> ${d.level} — ${LV_NAMES[d.level]}<br>
+      <b>Seed:</b> ${d.seed===1?"★ Yes":"No"}<br>
+      <b>Gender:</b> ${d.gender}<br>
+      <b>Age:</b> ${d.age}<br>
+      <b>Out-degree:</b> ${d.outDeg} (recruits)<br>
+      <b>In-degree:</b> ${d.inDeg} (recruited by)
+    `;
+    tooltip.classList.add("show");
+  })
+  .on("mousemove", event => {
+    const r = wrap.getBoundingClientRect();
+    let x = event.clientX-r.left+16, y = event.clientY-r.top-12;
+    if(x+220>W) x-=230;
+    tooltip.style.left=x+"px"; tooltip.style.top=y+"px";
+  })
+  .on("mouseout", () => tooltip.classList.remove("show"))
+  .on("click", (event, d) => {
+    event.stopPropagation();
+    nodeInfo.innerHTML = `
+      <div class="ni-id" style="color:${LV_COLORS[d.level]}">${d.id}</div>
+      <span class="badge ${d.seed===1?"badge-seed":"badge-nonseed"}">${d.seed===1?"★ Seed":"Non-seed"}</span>
+      <br><br>
+      <b>Level:</b> ${d.level}<br>
+      <b>Gender:</b> ${d.gender}<br>
+      <b>Age:</b> ${d.age}<br>
+      <b>Recruits:</b> ${d.outDeg} (out)<br>
+      <b>Recruited by:</b> ${d.inDeg} (in)
+    `;
+    highlightEgo(d);
+  });
+
+svgEl.on("click", () => {
+  resetHighlight();
+  nodeInfo.innerHTML = `<div class="ni-empty">Click a node to inspect</div>`;
+});
+
+function highlightEgo(d) {
+  const nbrs = new Set([d.id]);
+  edges.forEach(e => {
+    const s=e.source.id||e.source, t=e.target.id||e.target;
+    if(s===d.id) nbrs.add(t);
+    if(t===d.id) nbrs.add(s);
+  });
+  node.attr("opacity", n => nbrs.has(n.id)?1:0.1);
+  link.attr("stroke-opacity", e => {
+    const s=e.source.id||e.source, t=e.target.id||e.target;
+    return (s===d.id||t===d.id)?0.95:0.04;
+  });
+}
+function resetHighlight() {
+  node.attr("opacity",1);
+  link.attr("stroke-opacity",0.4);
+}
+
+// ── Tick ───────────────────────────────────────────────────
+sim.on("tick", () => {
+  link
+    .attr("x1",d=>d.source.x).attr("y1",d=>d.source.y)
+    .attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
+  node.attr("transform",d=>`translate(${d.x},${d.y})`);
+});
+
+// ── Filter buttons (header) ────────────────────────────────
+function nodeMatches(d, f) {
+  if(f==="all")     return true;
+  if(f==="seed")    return d.seed===1;
+  if(f==="nonseed") return d.seed===0;
+  if(f==="Male"||f==="Female") return d.gender===f;
+  if(f==="Adult"||f==="Minor") return d.age===f;
+  return true;
+}
+
+document.querySelectorAll(".pill-btn[data-filter]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".pill-btn[data-filter]").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    const f = btn.dataset.filter;
+    node.attr("opacity", d => nodeMatches(d,f)?1:0.07);
+    link.attr("stroke-opacity", d => {
+      const s=nodes.find(n=>n.id===(d.source.id||d.source));
+      const t=nodes.find(n=>n.id===(d.target.id||d.target));
+      return (nodeMatches(s,f)||nodeMatches(t,f))?0.45:0.04;
+    });
+    resetNodeInfo();
+  });
+});
+
+// ── Level legend click filter ──────────────────────────────
+let activeLv = null;
+function filterByLevel(lv, item) {
+  if(activeLv===lv) {
+    activeLv=null;
+    document.querySelectorAll(".legend-item").forEach(i=>i.classList.remove("dimmed"));
+    resetHighlight();
+  } else {
+    activeLv=lv;
+    document.querySelectorAll(".legend-item[data-lv]").forEach(i=>
+      i.classList.toggle("dimmed", +i.dataset.lv!==lv));
+    node.attr("opacity", d=>d.level===lv?1:0.07);
+    link.attr("stroke-opacity", d=>{
+      const s=nodes.find(n=>n.id===(d.source.id||d.source));
+      const t=nodes.find(n=>n.id===(d.target.id||d.target));
+      return (s?.level===lv||t?.level===lv)?0.7:0.03;
+    });
+  }
+}
+
+// ── RESET BUTTON ───────────────────────────────────────────
+document.getElementById("btn-reset").addEventListener("click", () => {
+  // Reset filter buttons
+  document.querySelectorAll(".pill-btn[data-filter]").forEach(b=>b.classList.remove("active"));
+  document.getElementById("filter-all").classList.add("active");
+  // Reset sliders
+  document.getElementById("ctrl-dist").value   = 70;
+  document.getElementById("ctrl-charge").value = -150;
+  document.getElementById("ctrl-str").value    = 0.4;
+  sim.force("link").distance(70).strength(0.4);
+  sim.force("charge").strength(-150);
+  // Reset level legend
+  activeLv = null;
+  document.querySelectorAll(".legend-item").forEach(i=>i.classList.remove("dimmed"));
+  // Reset graph
+  resetHighlight();
+  resetNodeInfo();
+  // Unpin all nodes
+  nodes.forEach(n=>{ n.fx=null; n.fy=null; });
+  // Reset zoom
+  svgEl.transition().duration(600).call(zoomBeh.transform, d3.zoomIdentity);
+  // Reheat simulation
+  sim.alpha(0.5).restart();
+});
+
+function resetNodeInfo() {
+  nodeInfo.innerHTML = `<div class="ni-empty">Click a node to inspect</div>`;
+}
+
+// ── Force controls ─────────────────────────────────────────
+document.getElementById("ctrl-dist").addEventListener("input", function() {
+  sim.force("link").distance(+this.value);
+  sim.alpha(0.3).restart();
+});
+document.getElementById("ctrl-charge").addEventListener("input", function() {
+  sim.force("charge").strength(+this.value);
+  sim.alpha(0.3).restart();
+});
+document.getElementById("ctrl-str").addEventListener("input", function() {
+  sim.force("link").strength(+this.value);
+  sim.alpha(0.3).restart();
+});
+
+// ── Resize ─────────────────────────────────────────────────
+window.addEventListener("resize", () => {
+  W=wrap.clientWidth; H=wrap.clientHeight;
+  sim.force("center", d3.forceCenter(W/2, H/2)).alpha(0.1).restart();
+});
+</script>
+</body>
+</html>

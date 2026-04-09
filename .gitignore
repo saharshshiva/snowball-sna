@@ -1,0 +1,21 @@
+# .DS_Store
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+.npm
+
+# Vercel
+.vercel
+
+# Sample data folder (large/unused)
+Sample/
