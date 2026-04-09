@@ -11,7 +11,7 @@
 
 ## 🌐 Live Demo
 
-👉 **[View on Vercel →](https://your-vercel-url.vercel.app)**  
+👉 **[View on Vercel →](https://snoball-zeta.vercel.app)**  
 _(URL will be updated after first deploy)_
 
 ---
